@@ -112,5 +112,40 @@ export class ActivityService {
     }));
     return { total: Number(total.toFixed(2)), byCategory, rows };
   }
+
+  async recalculateEmissionsForUser(userId: number, newRegion: string) {
+    logTemplate('info', 'ACTIVITY_RECALCULATE_START', { userId, newRegion });
+    const activities = await this.activityRepo.find({ where: { userId } });
+    if (activities.length === 0) {
+      logTemplate('info', 'ACTIVITY_RECALCULATE_SKIP', { userId, reason: 'no activities' });
+      return { updated: 0 };
+    }
+
+    const factors = await this.factorService.list(undefined, newRegion);
+    const factorMap = new Map<string, typeof factors[0]>();
+    factors.forEach((factor) => {
+      factorMap.set(`${factor.category}_${factor.subType}`, factor);
+    });
+
+    let updatedCount = 0;
+    for (const activity of activities) {
+      const key = `${activity.category}_${activity.subType}`;
+      const factor = factorMap.get(key);
+      if (factor) {
+        const carbonValue = calculateCarbonValue({
+          category: activity.category,
+          amount: Number(activity.amount),
+          factorValue: Number(factor.factorValue)
+        });
+        activity.factorId = Number(factor.id);
+        activity.carbonValue = String(carbonValue);
+        await this.activityRepo.save(activity);
+        updatedCount++;
+      }
+    }
+
+    logTemplate('info', 'ACTIVITY_RECALCULATE_SUCCESS', { userId, updatedCount, total: activities.length });
+    return { updated: updatedCount, total: activities.length };
+  }
 }
 

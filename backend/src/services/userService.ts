@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { forwardRef, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import bcrypt from 'bcryptjs';
 import { Repository } from 'typeorm';
@@ -10,6 +10,7 @@ import { AuthUser, JwtPayload } from '../types/auth';
 import { AppError } from '../utils/AppError';
 import { logTemplate } from '../utils/logger';
 import { signCarbonToken } from '../utils/jwt';
+import { ActivityService } from './activityService';
 
 export interface RegisterInput {
   username: string;
@@ -33,8 +34,9 @@ export interface ProfileInput {
 export class UserService {
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
-    @InjectRepository(Role) private readonly roleRepo: Repository<Role>
-  ) {}
+    @InjectRepository(Role) private readonly roleRepo: Repository<Role>,
+    @Inject(forwardRef(() => ActivityService)) private readonly activityService: ActivityService
+  ) { }
 
   serialize(user: User): AuthUser {
     return {
@@ -96,11 +98,16 @@ export class UserService {
   async updateProfile(userId: number, input: ProfileInput) {
     logTemplate('info', 'USER_PROFILE_UPDATE_START', { id: userId, field: Object.keys(input).join(',') || 'none' });
     const user = await this.findById(userId);
+    const oldRegion = user.region;
     user.username = input.username ?? user.username;
     user.avatar = input.avatar ?? user.avatar;
     user.region = input.region ?? user.region;
+    const regionChanged = input.region !== undefined && oldRegion !== input.region;
     try {
       const saved = await this.userRepo.save(user);
+      if (regionChanged) {
+        await this.activityService.recalculateEmissionsForUser(userId, input.region!);
+      }
       logTemplate('info', 'USER_PROFILE_UPDATE_SUCCESS', { id: userId, region: saved.region });
       return { message: Messages.USER_PROFILE_UPDATED, user: this.serialize(saved) };
     } catch (error) {

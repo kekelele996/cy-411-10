@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { getMe, updateProfile } from '../api/user';
 import { AuthUser } from '../types/auth';
+import { useActivityStore } from './activityStore';
 
 interface UserStore {
   profile: AuthUser | null;
@@ -9,7 +10,7 @@ interface UserStore {
   saveProfile: (payload: Partial<AuthUser>) => Promise<void>;
 }
 
-export const useUserStore = create<UserStore>((set) => ({
+export const useUserStore = create<UserStore>((set, get) => ({
   profile: null,
   loading: false,
   async loadProfile() {
@@ -19,8 +20,12 @@ export const useUserStore = create<UserStore>((set) => ({
   },
   async saveProfile(payload) {
     set({ loading: true });
+    const oldRegion = get().profile?.region;
     const result = await updateProfile(payload);
     set({ profile: result.user, loading: false });
+    if (payload.region && oldRegion !== payload.region) {
+      await useActivityStore.getState().refresh();
+    }
   }
 }));
 
